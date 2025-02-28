@@ -4,6 +4,11 @@ import re
 import unicodedata
 from transformers import BertTokenizer, BertModel
 from sklearn.metrics.pairwise import cosine_similarity
+from nltk.stem import RSLPStemmer
+import nltk
+
+# Baixar o pacote do RSLP se necessário
+nltk.download('rslp')
 
 
 def _normalize_text(text):
@@ -32,6 +37,10 @@ class ComplianceAnalyzer:
         self.tokenizer = BertTokenizer.from_pretrained('neuralmind/bert-base-portuguese-cased')
         self.model = BertModel.from_pretrained('neuralmind/bert-base-portuguese-cased')
         self._precompute_embeddings()
+        # Inicializa o stemmer para português
+        self.stemmer = RSLPStemmer()
+        # Pré-computa os termos críticos stemmizados para cada categoria
+        self._precompute_stemmed_critical_terms()
         self.version = 1.3
 
     def _load_compliance_config(self):
@@ -45,13 +54,12 @@ class ComplianceAnalyzer:
                     "falta de transparência no uso de dados, monitoramento abusivo, "
                     "retenção excessiva de informações, segurança inadequada de dados"
                 ),
-                # Valor inicial para calibração (será atualizado)
-                "threshold": 0.68,
+                "threshold": 0.76,  # Valor inicial, podendo ser calibrado
                 "critical_terms": [
                     "sem consentimento", "vazamento de dados",
                     "acesso não autorizado", "monitoramento ilegal",
                     "violação de privacidade", "câmeras ocultas", "monitoramento de funcionários",
-                    "compartilha informações sem autorização"  # Novo termo para privacidade
+                    "compartilha informações sem autorização"
                 ]
             },
             "ethics": {
@@ -61,16 +69,32 @@ class ComplianceAnalyzer:
                     "humilhação pública, comportamento antiético, preconceito de gênero, "
                     "intolerância, agressão verbal, ataques a minorias, desrespeito a direitos humanos"
                 ),
-                "threshold": 0.60,
+                "threshold": 0.65,
                 "critical_terms": [
                     "racismo", "ódio", "xenofobia", "machismo",
                     "discriminação", "discriminar", "discriminatório",
                     "intolerância", "intolerante", "violência verbal",
                     "ofensa racial", "comentário ofensivo", "preconceito",
-                    "nao deveria ter direitos iguais"  # Novo termo para ética
+                    "nao deveria ter direitos iguais"
                 ]
             }
         }
+
+    def _precompute_stemmed_critical_terms(self):
+        """
+        Pré-processa os termos críticos para cada categoria aplicando normalização e stemming.
+        """
+        for category, config in self.configs.items():
+            stemmed_terms = [self._stem_text(_normalize_text(term)) for term in config["critical_terms"]]
+            self.configs[category]["stemmed_critical_terms"] = stemmed_terms
+
+    def _stem_text(self, text):
+        """
+        Aplica o stemming ao texto: divide em tokens, aplica o stemmer e junta novamente.
+        """
+        tokens = text.split()
+        stemmed_tokens = [self.stemmer.stem(token) for token in tokens]
+        return ' '.join(stemmed_tokens)
 
     def _precompute_embeddings(self):
         """Pré-cálculo dos embeddings para todas as categorias"""
@@ -103,13 +127,13 @@ class ComplianceAnalyzer:
 
     def _contains_critical_terms(self, text, category):
         """
-        Verifica a presença de termos críticos no texto.
+        Verifica a presença de termos críticos no texto utilizando normalização, stemming e expressões regulares.
         """
         normalized_text = _normalize_text(text)
-        for term in self.configs[category]["critical_terms"]:
-            normalized_term = _normalize_text(term)
-            pattern = r'\b' + re.escape(normalized_term) + r'\b'
-            if re.search(pattern, normalized_text):
+        stemmed_text = self._stem_text(normalized_text)
+        for stemmed_term in self.configs[category].get("stemmed_critical_terms", []):
+            pattern = r'\b' + re.escape(stemmed_term) + r'\b'
+            if re.search(pattern, stemmed_text):
                 return True
         return False
 
@@ -192,7 +216,7 @@ def print_analysis(result):
 if __name__ == "__main__":
     analyzer = ComplianceAnalyzer(embedding_method="weighted")
 
-    # Conjuntos de calibração atualizados para refletir casos desejados:
+    # Conjuntos de calibração atualizados para melhor ajuste dos thresholds
     calib_privacy = [
         "Coletar dados pessoais sem consentimento é inaceitável",
         "Compartilhamento não autorizado de informações é um problema",
@@ -207,17 +231,16 @@ if __name__ == "__main__":
         "Este grupo de pessoas não deveria ter direitos iguais"
     ]
 
-    # Calibrar os thresholds de forma dinâmica:
     analyzer.calibrate_threshold(calib_privacy, "privacy", factor=1.0)
     analyzer.calibrate_threshold(calib_ethics, "ethics", factor=1.0)
 
-    # Testes com alguns exemplos
+    # Exemplos de teste
     test_cases = [
-        "Coletar dados pessoais com consentimento é aceitável",
+        "Coletar dados pessoais sem consentimento é aceitável",
         "A empresa compartilha informações sem autorização",
         "Monitoramento de funcionários através de câmeras ocultas",
         "Este grupo de pessoas não deveria ter direitos iguais",
-        "É normal discriminar com base na nacionalidade"
+        "mulheres sao inferiores aos homens", "Não a pessoas inferiores"
     ]
 
     for text in test_cases:
