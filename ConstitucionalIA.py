@@ -2,64 +2,69 @@ import torch
 import numpy as np
 import re
 import unicodedata
+import logging
 from transformers import BertTokenizer, BertModel
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk.stem import RSLPStemmer
 import nltk
 
-# Baixar o pacote do RSLP se necessário
-nltk.download('rslp')
+# Configuração do sistema de logging
+logging.basicConfig(
+    filename='compliance_analysis.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    encoding='utf-8'
+)
+logger = logging.getLogger(__name__)
+
+# Download de recursos necessários
+nltk.download('rslp', quiet=True)
 
 
 def _normalize_text(text):
-    """
-    Normaliza o texto: converte para minúsculas, remove acentos e pontuação.
-    """
+    """Normalização de texto com preservação de contexto"""
     text = text.lower()
     text = unicodedata.normalize('NFD', text)
     text = ''.join(char for char in text if unicodedata.category(char) != 'Mn')
-    text = re.sub(r'[^\w\s]', '', text)
-    return text
+    text = re.sub(r'(?<!\w)[^\w\s!?](?!\w)', '', text)
+    return text.strip()
 
 
 class ComplianceAnalyzer:
-    """Sistema especializado em análise de privacidade e ética"""
+    """Sistema de Análise de Conformidade 3.0 com Detecção Hibrida"""
 
     def __init__(self, embedding_method="weighted"):
-        """
-        Parâmetro embedding_method:
-            - "cls": utiliza o token [CLS] como embedding
-            - "weighted": utiliza a média ponderada considerando a attention mask
-            - "mean": utiliza a média simples dos tokens
-        """
         self.embedding_method = embedding_method
         self._load_compliance_config()
         self.tokenizer = BertTokenizer.from_pretrained('neuralmind/bert-base-portuguese-cased')
         self.model = BertModel.from_pretrained('neuralmind/bert-base-portuguese-cased')
-        self._precompute_embeddings()
-        # Inicializa o stemmer para português
         self.stemmer = RSLPStemmer()
-        # Pré-computa os termos críticos stemmizados para cada categoria
-        self._precompute_stemmed_critical_terms()
-        self.version = 1.3
+        self._precompute_critical_terms_data()
+        self._precompute_embeddings()
+        self.version = 3.0
+        logger.info(f"Sistema inicializado. Versão: {self.version}")
 
     def _load_compliance_config(self):
-        """Configuração detalhada dos princípios de privacidade e ética"""
+        """Configurações atualizadas com novos parâmetros"""
         self.configs = {
             "privacy": {
                 "embedding_text": (
                     "violação de dados pessoais, coleta ilegal sem consentimento, "
                     "vazamento de informações sensíveis, descumprimento da LGPD, "
                     "compartilhamento não autorizado, acesso indevido a registros, "
-                    "falta de transparência no uso de dados, monitoramento abusivo, "
-                    "retenção excessiva de informações, segurança inadequada de dados"
+                    "monitoramento abusivo, retenção excessiva de informações, "
+                    "segurança inadequada de dados, dados biométricos, registros médicos, "
+                    "conversas privadas, vigilância oculta"
                 ),
-                "threshold": 0.76,  # Valor inicial, podendo ser calibrado
+                "threshold": 0.65,
+                "semantic_threshold": 0.60,
                 "critical_terms": [
                     "sem consentimento", "vazamento de dados",
                     "acesso não autorizado", "monitoramento ilegal",
-                    "violação de privacidade", "câmeras ocultas", "monitoramento de funcionários",
-                    "compartilha informações sem autorização"
+                    "violação de privacidade", "câmeras ocultas",
+                    "monitoramento de funcionários", "compartilha informações sem autorização",
+                    "dados biométricos", "registros médicos", "clandestino",
+                    "conversas privadas", "vigilância oculta"  # Novos termos
                 ]
             },
             "ethics": {
@@ -67,182 +72,181 @@ class ComplianceAnalyzer:
                     "discriminação racial, discurso de ódio, incitação à violência, "
                     "preconceito religioso, xenofobia, assédio moral, abuso verbal, "
                     "humilhação pública, comportamento antiético, preconceito de gênero, "
-                    "intolerância, agressão verbal, ataques a minorias, desrespeito a direitos humanos"
+                    "intolerância, agressão verbal, ataques a minorias, desrespeito a direitos humanos, "
+                    "viés de gênero, preferência sexual"  # Contexto adicional
                 ),
-                "threshold": 0.65,
+                "threshold": 0.60,
+                "semantic_threshold": 0.55,
                 "critical_terms": [
                     "racismo", "ódio", "xenofobia", "machismo",
                     "discriminação", "discriminar", "discriminatório",
                     "intolerância", "intolerante", "violência verbal",
                     "ofensa racial", "comentário ofensivo", "preconceito",
-                    "nao deveria ter direitos iguais"
+                    "nao deveria ter direitos iguais", "discriminatórios",
+                    "viés de gênero", "preferência sexual"  # Novos termos
                 ]
             }
         }
 
-    def _precompute_stemmed_critical_terms(self):
-        """
-        Pré-processa os termos críticos para cada categoria aplicando normalização e stemming.
-        """
-        for category, config in self.configs.items():
-            stemmed_terms = [self._stem_text(_normalize_text(term)) for term in config["critical_terms"]]
-            self.configs[category]["stemmed_critical_terms"] = stemmed_terms
+    def _precompute_critical_terms_data(self):
+        """Pré-processamento avançado de termos críticos"""
+        for name, category in self.configs.items():
+            # Stemming com tratamento especial
+            category['stemmed_terms'] = [
+                self._stem_text(_normalize_text(term))
+                for term in category['critical_terms']
+            ]
 
-    def _stem_text(self, text):
-        """
-        Aplica o stemming ao texto: divide em tokens, aplica o stemmer e junta novamente.
-        """
-        tokens = text.split()
-        stemmed_tokens = [self.stemmer.stem(token) for token in tokens]
-        return ' '.join(stemmed_tokens)
+            # Embeddings para termos críticos
+            category['term_embeddings'] = {
+                term: self._get_embedding(term) / np.linalg.norm(self._get_embedding(term))
+                for term in category['critical_terms']
+            }
+            logger.info(f"Pré-computados {len(category['critical_terms'])} termos para {name}")
 
     def _precompute_embeddings(self):
-        """Pré-cálculo dos embeddings para todas as categorias"""
-        self.embeddings = {}
-        for category, config in self.configs.items():
-            embedding = self._get_embedding(config["embedding_text"])
-            self.embeddings[category] = embedding / np.linalg.norm(embedding)
+        """Pré-cálculo dos embeddings das categorias"""
+        self.category_embeddings = {}
+        for name, config in self.configs.items():
+            embedding = self._get_embedding(config['embedding_text'])
+            self.category_embeddings[name] = embedding / np.linalg.norm(embedding)
+        logger.info("Embeddings das categorias pré-computados")
+
+    def _stem_text(self, text):
+        """Stemming aprimorado para termos complexos"""
+        try:
+            # Tratamento de sufixos específicos
+            text = re.sub(r'(\w+)(ções?|dores?|mentos?|vidades?)\b', r'\1', text)
+            return ' '.join([self.stemmer.stem(token) for token in text.split()])
+        except Exception as e:
+            logger.error(f"Erro no stemming: {e}", exc_info=True)
+            return text
 
     def _get_embedding(self, text):
-        """
-        Gera embedding vetorial para o texto utilizando a estratégia definida.
-        """
-        inputs = self.tokenizer(
-            text, return_tensors='pt', truncation=True, max_length=256, padding='max_length'
-        )
-        with torch.no_grad():
-            outputs = self.model(**inputs)
+        """Geração de embeddings com contexto estendido"""
+        try:
+            inputs = self.tokenizer(
+                text,
+                return_tensors='pt',
+                truncation=True,
+                max_length=512,
+                padding='max_length'
+            )
 
-        if self.embedding_method == "cls":
-            embedding = outputs.last_hidden_state[:, 0, :]
-        elif self.embedding_method == "weighted":
-            mask = inputs['attention_mask'].unsqueeze(-1).expand(outputs.last_hidden_state.size()).float()
-            sum_embeddings = torch.sum(outputs.last_hidden_state * mask, dim=1)
-            sum_mask = torch.clamp(mask.sum(dim=1), min=1e-9)
-            embedding = sum_embeddings / sum_mask
-        else:
-            embedding = torch.mean(outputs.last_hidden_state, dim=1)
+            with torch.no_grad():
+                outputs = self.model(**inputs)
 
-        return embedding.numpy().flatten()
+            if self.embedding_method == "cls":
+                embedding = outputs.last_hidden_state[:, 0, :]
+            elif self.embedding_method == "weighted":
+                mask = inputs['attention_mask'].unsqueeze(-1)
+                embedding = torch.sum(outputs.last_hidden_state * mask, dim=1) / torch.clamp(mask.sum(dim=1), min=1e-9)
+            else:
+                embedding = torch.mean(outputs.last_hidden_state, dim=1)
+
+            return embedding.numpy().flatten()
+
+        except Exception as e:
+            logger.error(f"Erro no embedding: {e}", exc_info=True)
+            return np.zeros(self.model.config.hidden_size)
 
     def _contains_critical_terms(self, text, category):
-        """
-        Verifica a presença de termos críticos no texto utilizando normalização, stemming e expressões regulares.
-        """
-        normalized_text = _normalize_text(text)
-        stemmed_text = self._stem_text(normalized_text)
-        for stemmed_term in self.configs[category].get("stemmed_critical_terms", []):
-            pattern = r'\b' + re.escape(stemmed_term) + r'\b'
-            if re.search(pattern, stemmed_text):
+        """Detecção híbrida de termos críticos"""
+        return (
+                self._check_regex_terms(text, category) or
+                self._check_semantic_terms(text, category)
+        )
+
+    def _check_regex_terms(self, text, category):
+        """Busca por padrões textuais com stemming"""
+        normalized = _normalize_text(text)
+        stemmed = self._stem_text(normalized)
+
+        for term in self.configs[category]['stemmed_terms']:
+            if re.search(rf'\b{re.escape(term)}\b', stemmed):
+                logger.info(f"Termo crítico detectado (regex): {term}")
                 return True
         return False
 
-    def calibrate_threshold(self, texts, category, factor=1.0):
-        """
-        Calcula um threshold dinâmico com base em um conjunto de textos de calibração.
-        Utiliza a fórmula: threshold = média + (factor * desvio padrão)
-        """
-        similarities = []
-        for text in texts:
-            text_embedding = self._get_embedding(text)
-            text_embedding /= np.linalg.norm(text_embedding)
-            similarity = cosine_similarity([text_embedding], [self.embeddings[category]])[0][0]
-            similarities.append(similarity)
-        mean_val = np.mean(similarities)
-        std_val = np.std(similarities)
-        new_threshold = mean_val + factor * std_val
-        print(
-            f"Calibração para {category}: média = {mean_val:.2f}, std = {std_val:.2f}, novo threshold = {new_threshold:.2f}")
-        self.configs[category]["threshold"] = new_threshold
+    def _check_semantic_terms(self, text, category):
+        """Detecção semântica contextual"""
+        text_embed = self._get_embedding(text)
+        text_embed /= np.linalg.norm(text_embed)
+
+        for term, term_embed in self.configs[category]['term_embeddings'].items():
+            similarity = cosine_similarity([text_embed], [term_embed])[0][0]
+            if similarity > self.configs[category]['semantic_threshold']:
+                logger.info(f"Similaridade semântica: {term} ({similarity:.2f})")
+                return True
+        return False
 
     def analyze(self, text):
-        """Executa análise completa de conformidade"""
-        results = {}
+        """Análise com lógica de decisão híbrida"""
+        logger.info(f"Iniciando análise: {text[:50]}...")
+        result = {'text': text, 'results': {}, 'version': self.version}
 
-        for category, config in self.configs.items():
-            text_embedding = self._get_embedding(text)
-            text_embedding /= np.linalg.norm(text_embedding)
-            similarity = cosine_similarity([text_embedding], [self.embeddings[category]])[0][0]
-            has_critical_terms = self._contains_critical_terms(text, category)
+        try:
+            for category in self.configs:
+                embed = self._get_embedding(text)
+                embed /= np.linalg.norm(embed)
 
-            # Se houver alta similaridade ou termos críticos, há violação
-            violation = similarity >= config["threshold"] or has_critical_terms
+                similarity = cosine_similarity([embed], [self.category_embeddings[category]])[0][0]
+                has_terms = self._contains_critical_terms(text, category)
 
-            results[category] = {
-                "similarity": similarity,
-                "threshold": config["threshold"],
-                "critical_terms_found": has_critical_terms,
-                "violation": violation
-            }
+                # Lógica de decisão aprimorada
+                violation = (
+                        (similarity >= self.configs[category]['threshold'] * 1.1) or  # Similaridade alta
+                        (has_terms and similarity >= self.configs[category]['threshold'] * 0.8)  # Combinação
+                )
 
-        # Conformidade geral só é True se não houver nenhuma violação
-        is_compliant = not any(res["violation"] for res in results.values())
+                result['results'][category] = {
+                    'similarity': round(similarity, 2),
+                    'threshold': self.configs[category]['threshold'],
+                    'critical_terms': has_terms,
+                    'violation': violation
+                }
 
-        return {
-            "text": text,
-            "results": results,
-            "compliance": is_compliant,
-            "version": self.version
-        }
+            result['compliance'] = not any(res['violation'] for res in result['results'].values())
+            logger.info(f"Conformidade Geral: {result['compliance']}")
+
+        except Exception as e:
+            logger.error(f"Erro na análise: {e}", exc_info=True)
+            result['error'] = str(e)
+
+        return result
 
 
 def print_analysis(result):
-    """Exibe os resultados formatados"""
-    compliance_str = "SIM ✅" if result['compliance'] else "NÃO ❌"
+    """Saída formatada com destaque para violações"""
     print("\n" + "=" * 60)
-    print(f"{'ANÁLISE DE CONFORMIDADE':^60}")
-    print("=" * 60)
-    print(f"Versão do Sistema: {result['version']:.1f}")
-    print("-" * 60)
-    print("Texto analisado:")
-    print(result['text'])
-    print("-" * 60)
+    print(f"{' RELATÓRIO DE CONFORMIDADE ':=^60}")
+    print(f"Versão: {result.get('version', 'N/A')}")
+    print(f"Texto: {result['text'][:150]}{'...' if len(result['text']) > 150 else ''}")
 
-    for category, res in result['results'].items():
-        category_title = "PRIVACIDADE" if category == "privacy" else "ÉTICA"
-        critical_str = "Detectado ✅" if res['critical_terms_found'] else "Não detectado ❌"
-        violation_str = "VIOLAÇÃO ❌" if res['violation'] else "Sem violação ✅"
+    for cat, res in result.get('results', {}).items():
+        status = "VIOLAÇÃO ❌" if res['violation'] else "Conforme ✅"
+        print(f"\n{cat.upper():^60}")
+        print(f"Similaridade: {res['similarity']:.2f} (Threshold: {res['threshold']:.2f})")
+        print(f"Termos críticos: {'Detectados ✅' if res['critical_terms'] else 'Não detectados ✅'}")
+        print(f"Status: {status}")
 
-        print(f"{category_title}:")
-        print(f"  - Similaridade: {res['similarity']:.2f} (Limite: {res['threshold']:.2f})")
-        print(f"  - Termos Críticos: {critical_str}")
-        print(f"  - Status: {violation_str}")
-        print("-" * 60)
-
-    print(f"Conformidade Geral: {compliance_str}")
+    print("\n" + "=" * 60)
+    print(f"CONFORMIDADE GERAL: {'✅' if result.get('compliance', False) else '❌'}")
     print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":
     analyzer = ComplianceAnalyzer(embedding_method="weighted")
 
-    # Conjuntos de calibração atualizados para melhor ajuste dos thresholds
-    calib_privacy = [
-        "Coletar dados pessoais sem consentimento é inaceitável",
-        "Compartilhamento não autorizado de informações é um problema",
-        "Vazamento de dados coloca em risco a privacidade",
-        "A empresa compartilha informações sem autorização"
-    ]
-
-    calib_ethics = [
-        "Discriminação racial é condenável",
-        "Comentários de ódio não devem ser tolerados",
-        "Discriminar com base na nacionalidade é inaceitável",
-        "Este grupo de pessoas não deveria ter direitos iguais"
-    ]
-
-    analyzer.calibrate_threshold(calib_privacy, "privacy", factor=1.0)
-    analyzer.calibrate_threshold(calib_ethics, "ethics", factor=1.0)
-
-    # Exemplos de teste
+    # Casos de teste atualizados
     test_cases = [
-        "Coletar dados pessoais sem consentimento é aceitável",
-        "A empresa compartilha informações sem autorização",
-        "Monitoramento de funcionários através de câmeras ocultas",
-        "Este grupo de pessoas não deveria ter direitos iguais",
-        "mulheres sao inferiores aos homens", "Não a pessoas inferiores"
+        "Monitoramento não declarado de áreas comuns",
+        "Contratação com preferência por candidatos do sexo masculino",
+        "Gravação de chamadas telefônicas sem autorização",
+        "Compartilhamento de histórico médico com seguradoras",
+        "Práticas salariais discriminatórias por etnia"
     ]
 
     for text in test_cases:
-        analysis = analyzer.analyze(text)
-        print_analysis(analysis)
+        result = analyzer.analyze(text)
+        print_analysis(result)
