@@ -37,7 +37,7 @@ class AnalisadorRelevancia:
         self.modelo = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased-v2')
         self.model = RelevanciaModel()
         self.historico = []  # Armazena os resultados de cada avaliação.
-        self.limiar_padrao = 0.45  # Limiar padrão utilizado.
+        self.limiar_padrao = 0.3  # Limiar padrão utilizado.
 
     def avaliar_relevancia(self, pergunta: str, resposta: str) -> dict:
         """
