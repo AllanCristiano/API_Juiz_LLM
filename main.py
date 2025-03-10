@@ -1,37 +1,53 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from relevancia import RelevanciaController
+from ConstitucionalIA import ComplianceAnalyzer
 
 app = FastAPI()
-controller = RelevanciaController()
 
-# Modelo de dados para a requisição: apenas "pergunta" e "resposta"
+# Instancia dos controllers para cada funcionalidade
+relevancia_controller = RelevanciaController()
+compliance_analyzer = ComplianceAnalyzer()
+
+# Modelos de dados para as requisições
 class Consulta(BaseModel):
     pergunta: str
     resposta: str
 
+class TextRequest(BaseModel):
+    texto: str
+
+# Rotas para a funcionalidade de relevância
 @app.post("/avaliar")
 def avaliar_consulta(consulta: Consulta):
     """
-    Endpoint que recebe a pergunta e a resposta, processa a consulta e retorna o resultado da avaliação em JSON.
+    Recebe "pergunta" e "resposta", processa a avaliação de relevância e retorna o relatório detalhado.
     """
-    # Processa a consulta usando o limiar padrão (definido internamente como 0.45)
-    controller.processar_consulta(consulta.pergunta, consulta.resposta)
-    # Obtém o relatório completo da última avaliação
-    relatorio = controller.exibir_relatorio(-1)
+    relevancia_controller.processar_consulta(consulta.pergunta, consulta.resposta)
+    relatorio = relevancia_controller.exibir_relatorio(-1)
     return relatorio
 
 @app.get("/historico")
 def obter_historico():
-    """
-    Endpoint que retorna o histórico de todas as avaliações realizadas.
-    """
-    return {"historico": controller.obter_historico()}
+    """Retorna o histórico completo de avaliações de relevância."""
+    return {"historico": relevancia_controller.obter_historico()}
 
 @app.get("/ajustar-limiar")
 def ajustar_limiar():
-    """
-    Endpoint que ajusta automaticamente o limiar com base no histórico de escores e retorna o novo valor.
-    """
-    novo_limiar = controller.ajustar_limiar()
+    """Ajusta automaticamente o limiar com base no histórico de relevância e retorna o novo valor."""
+    novo_limiar = relevancia_controller.ajustar_limiar()
     return {"novo_limiar": novo_limiar}
+
+# Rotas para a funcionalidade de conformidade (Compliance)
+@app.post("/analisar")
+def analisar_texto(request: TextRequest):
+    """
+    Recebe um JSON com o campo "texto", executa a análise de conformidade e retorna o resultado.
+    """
+    resultado = compliance_analyzer.analisar(request.texto)
+    return resultado.to_dict()
+
+@app.get("/version")
+def get_version():
+    """Retorna a versão do sistema de análise de conformidade."""
+    return {"versao": compliance_analyzer.version}

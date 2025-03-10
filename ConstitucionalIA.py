@@ -19,18 +19,16 @@ logger = logging.getLogger(__name__)
 
 nltk.download('rslp', quiet=True)
 
-
 def _normalize_text(text):
-    """Normaliza texto removendo acentos e caracteres especiais"""
+    """Normaliza texto removendo acentos e caracteres especiais."""
     text = text.lower()
     text = unicodedata.normalize('NFD', text)
     text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
     text = re.sub(r'(?<!\w)[^\w\s!?](?!\w)', '', text)
     return text.strip()
 
-
 class ComplianceResult:
-    """Armazena e formata resultados da análise de conformidade"""
+    """Armazena e formata resultados da análise de conformidade."""
 
     def __init__(self, text, version):
         self.text = text
@@ -41,12 +39,12 @@ class ComplianceResult:
         self.error = None
 
     def add_category_result(self, category, similarity, threshold, detected_terms, violation):
-        """Adiciona resultados de uma categoria específica"""
+        """Adiciona resultados de uma categoria específica."""
         self.categories[category] = {
             'similarity_score': float(round(similarity, 2)),
             'similarity_threshold': float(threshold),
             'detected_terms': detected_terms,
-            'violation_triggered': violation
+            'violation_triggered': bool(violation)
         }
 
         if violation:
@@ -58,7 +56,7 @@ class ComplianceResult:
             self.compliance_status = False
 
     def _get_violation_reasons(self, similarity, threshold, detected_terms):
-        """Identifica os motivos da violação"""
+        """Identifica os motivos da violação."""
         reasons = []
         if similarity >= threshold * 1.1:
             reasons.append('similaridade_alta')
@@ -67,27 +65,27 @@ class ComplianceResult:
         return reasons
 
     def _calculate_risk_score(self, similarity, detected_terms):
-        """Calcula o score de risco normalizado"""
+        """Calcula o score de risco normalizado."""
         term_factor = 0.4 if any(detected_terms.values()) else 0
         similarity_factor = min(similarity / 1.5, 0.6)
         return float(round(term_factor + similarity_factor, 2))
 
     def _get_violation_details(self, category, detected_terms, similarity, threshold):
-        """Coleta detalhes específicos da violação"""
+        """Coleta detalhes específicos da violação."""
         return {
             'termos_detectados': {
                 'exatos': [
                     {
                         'termo_original': term['original_term'],
                         'variante_detectada': term['matched_variant']
-                    } for term in detected_terms['regex_terms']
+                    } for term in detected_terms.get('regex_terms', [])
                 ],
                 'semanticos': [
                     {
                         'termo_referencia': term['term'],
-                        'similaridade': term['similarity'],
+                        'similarity': term['similarity'],
                         'threshold': term['threshold']
-                    } for term in detected_terms['semantic_terms']
+                    } for term in detected_terms.get('semantic_terms', [])
                 ]
             },
             'metricas_similaridade': {
@@ -97,7 +95,7 @@ class ComplianceResult:
         }
 
     def set_error(self, error_message):
-        """Registra erros durante o processamento"""
+        """Registra erros durante o processamento."""
         self.error = {
             'message': error_message,
             'compliance_status': None
@@ -105,11 +103,11 @@ class ComplianceResult:
         self.compliance_status = False
 
     def to_dict(self):
-        """Retorna resultados em formato dicionário serializável"""
+        """Retorna resultados em formato dicionário serializável."""
         return {
             'texto_analisado': self.text,
             'versao_sistema': self.version,
-            'conformidade_geral': self.compliance_status,
+            'conformidade_geral': bool(self.compliance_status),
             'violacoes': self.violations if self.violations else None,
             'detalhes_analise': self.categories,
             'erro': self.error
@@ -117,7 +115,7 @@ class ComplianceResult:
 
 
 class ComplianceAnalyzer:
-    """Sistema de análise de conformidade regulatória"""
+    """Sistema de análise de conformidade regulatória."""
 
     def __init__(self, embedding_method="weighted"):
         self.embedding_method = embedding_method
@@ -129,7 +127,7 @@ class ComplianceAnalyzer:
         self.version = "3.2.1"
 
     def _carregar_configuracoes(self):
-        """Carrega configurações das categorias de análise"""
+        """Carrega configurações das categorias de análise."""
         self.config = {
             "privacidade": {
                 "texto_referencia": (
@@ -158,22 +156,24 @@ class ComplianceAnalyzer:
         }
 
     def _preprocessar_recursos(self):
-        """Pré-processa termos críticos e embeddings"""
-        # Stemming de termos
+        """Pré-processa termos críticos e gera embeddings de referência para as categorias."""
         for categoria in self.config.values():
             categoria['termos_stemmizados'] = [
                 self._aplicar_stemming(_normalize_text(termo))
                 for termo in categoria['termos_criticos']
             ]
 
-        # Embeddings das categorias
         self.embeddings_categorias = {}
         for nome, config in self.config.items():
             embedding = self._gerar_embedding(config['texto_referencia'])
-            self.embeddings_categorias[nome] = embedding / np.linalg.norm(embedding)
+            norm = np.linalg.norm(embedding)
+            if norm != 0:
+                self.embeddings_categorias[nome] = embedding / norm
+            else:
+                self.embeddings_categorias[nome] = embedding
 
     def _aplicar_stemming(self, texto):
-        """Aplica stemming com tratamento de exceções"""
+        """Aplica stemming com tratamento de exceções."""
         try:
             texto = re.sub(r'(\w+)(ções?|dores?|mentos?|vidades?)\b', r'\1', texto)
             return ' '.join([self.stemmer.stem(palavra) for palavra in texto.split()])
@@ -182,7 +182,7 @@ class ComplianceAnalyzer:
             return texto
 
     def _gerar_embedding(self, texto):
-        """Gera embeddings para texto"""
+        """Gera embedding para um texto utilizando o BERT."""
         try:
             inputs = self.tokenizer(
                 texto,
@@ -208,13 +208,17 @@ class ComplianceAnalyzer:
             return np.zeros(self.model.config.hidden_size)
 
     def analisar(self, texto):
-        """Executa análise completa do texto"""
+        """Executa a análise completa do texto e retorna um ComplianceResult."""
         resultado = ComplianceResult(texto, self.version)
 
         try:
             for categoria in self.config:
                 embedding_texto = self._gerar_embedding(texto)
-                embedding_norm = embedding_texto / np.linalg.norm(embedding_texto)
+                norm = np.linalg.norm(embedding_texto)
+                if norm != 0:
+                    embedding_norm = embedding_texto / norm
+                else:
+                    embedding_norm = embedding_texto
 
                 similaridade = cosine_similarity(
                     [embedding_norm],
@@ -243,11 +247,10 @@ class ComplianceAnalyzer:
         return resultado
 
     def _detectar_termos(self, texto, categoria):
-        """Detecta termos críticos com metadados completos"""
+        """Detecta termos críticos e retorna metadados."""
         texto_normalizado = _normalize_text(texto)
         texto_stemmizado = self._aplicar_stemming(texto_normalizado)
 
-        # Detecção exata
         termos_exatos = []
         for original, stemmizado in zip(
                 self.config[categoria]['termos_criticos'],
@@ -259,20 +262,27 @@ class ComplianceAnalyzer:
                     'matched_variant': stemmizado
                 })
 
-        # Detecção semântica
         termos_semanticos = []
         embedding_texto = self._gerar_embedding(texto)
-        embedding_norm = embedding_texto / np.linalg.norm(embedding_texto)
+        norm = np.linalg.norm(embedding_texto)
+        if norm != 0:
+            embedding_norm = embedding_texto / norm
+        else:
+            embedding_norm = embedding_texto
 
         for termo in self.config[categoria]['termos_criticos']:
             embedding_termo = self._gerar_embedding(termo)
-            embedding_termo_norm = embedding_termo / np.linalg.norm(embedding_termo)
-            similaridade = cosine_similarity([embedding_norm], [embedding_termo_norm])[0][0]
+            norm_termo = np.linalg.norm(embedding_termo)
+            if norm_termo != 0:
+                embedding_termo_norm = embedding_termo / norm_termo
+            else:
+                embedding_termo_norm = embedding_termo
+            similaridade_termo = cosine_similarity([embedding_norm], [embedding_termo_norm])[0][0]
 
-            if similaridade > self.config[categoria]['threshold_semantico']:
+            if similaridade_termo > self.config[categoria]['threshold_semantico']:
                 termos_semanticos.append({
                     'term': termo,
-                    'similarity': float(round(similaridade, 2)),
+                    'similarity': float(round(similaridade_termo, 2)),
                     'threshold': self.config[categoria]['threshold_semantico']
                 })
 
@@ -282,62 +292,29 @@ class ComplianceAnalyzer:
         }
 
     def _verificar_violacao(self, similaridade, termos_detectados, threshold):
-        """Determina se ocorreu violação"""
+        """Determina se houve violação com base na similaridade e nos termos detectados."""
         tem_termos = any(termos_detectados['regex_terms']) or any(termos_detectados['semantic_terms'])
-        return (
-                (similaridade >= threshold * 1.1) or
-                (tem_termos and similaridade >= threshold * 0.8)
-        )
-
+        return (similaridade >= threshold * 1.1) or (tem_termos and similaridade >= threshold * 0.8)
 
 def formatar_resultado(resultado):
-    """Gera relatório formatado para exibição"""
+    """Formata o resultado da análise para exibição (texto formatado)."""
     dados = resultado.to_dict()
-
     relatorio = []
     relatorio.append("\n=== ANÁLISE DE CONFORMIDADE ===")
     relatorio.append(f"Versão do sistema: {dados['versao_sistema']}")
     relatorio.append(f"Texto analisado: {dados['texto_analisado'][:150]}...")
     relatorio.append(f"\nStatus Geral: {'CONFORME ✅' if dados['conformidade_geral'] else 'NÃO CONFORME ❌'}")
-
     if dados['violacoes']:
         relatorio.append("\nVIOLAÇÕES DETECTADAS:")
         for categoria, detalhes in dados['violacoes'].items():
             relatorio.append(f"\n■ Categoria: {categoria.upper()}")
             relatorio.append(f"  - Nível de Risco: {detalhes['risk_score']:.2f}/1.0")
             relatorio.append(f"  - Motivos: {', '.join(detalhes['reasons'])}")
-
-            if detalhes['details']['termos_detectados']['exatos']:
-                relatorio.append("\n  TERMOS EXATOS ENCONTRADOS:")
-                for termo in detalhes['details']['termos_detectados']['exatos']:
-                    relatorio.append(f"    • Original: {termo['termo_original']}")
-                    relatorio.append(f"      Detectado: {termo['variante_detectada']}")
-
-            if detalhes['details']['termos_detectados']['semanticos']:
-                relatorio.append("\n  TERMOS SEMÂNTICOS RELACIONADOS:")
-                for termo in detalhes['details']['termos_detectados']['semanticos']:
-                    relatorio.append(f"    • Termo de Referência: {termo['termo_referencia']}")
-                    relatorio.append(
-                        f"      Similaridade: {termo['similaridade']:.2f} (Threshold: {termo['threshold']:.2f})")
-
-            relatorio.append("\n  MÉTRICAS DE SIMILARIDADE:")
-            relatorio.append(f"    • Score: {detalhes['details']['metricas_similaridade']['valor']:.2f}")
-            relatorio.append(f"    • Threshold: {detalhes['details']['metricas_similaridade']['threshold']:.2f}")
-
     relatorio.append("\n" + "=" * 60)
     return '\n'.join(relatorio)
 
-
 if __name__ == "__main__":
-    '''Exemplo de uso interno'''
-    analisador = ComplianceAnalyzer()
-
-    casos_teste = [
-        "Monitoramento não declarado de áreas de descanso dos funcionários",
-        "Política de contratação exclusiva para homens",
-        "Armazenamento de dados biométricos sem autorização explícita"
-    ]
-
-    for texto in casos_teste:
-        resultado = analisador.analisar(texto)
-        print(formatar_resultado(resultado))
+    analyzer = ComplianceAnalyzer()
+    texto_teste = "Monitoramento não declarado de áreas de descanso dos funcionários."
+    resultado = analyzer.analisar(texto_teste)
+    print(formatar_resultado(resultado))

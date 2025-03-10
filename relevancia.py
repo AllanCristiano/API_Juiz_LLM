@@ -1,14 +1,14 @@
 import unicodedata
 import re
 import numpy as np
-from skimage.filters import threshold_otsu  # pip install scikit-image
+from skimage.filters import threshold_otsu
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
 class RelevanciaModel:
     def preprocess_text(self, text: str) -> str:
-        """Remove acentos e pontuação do texto, retornando-o em minúsculas."""
+        """Remove acentos e pontuação do texto e retorna-o em minúsculas."""
         text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
         text = re.sub(r'[^\w\s]', '', text)
         return text.lower()
@@ -18,8 +18,8 @@ class RelevanciaModel:
         return model.encode(texts)
 
     def compute_similarity(self, embedding1, embedding2) -> float:
-        """Calcula a similaridade de cosseno entre dois embeddings."""
-        return cosine_similarity([embedding1], [embedding2])[0][0]
+        """Calcula a similaridade de cosseno entre dois embeddings e converte para float nativo."""
+        return float(cosine_similarity([embedding1], [embedding2])[0][0])
 
 
 def auto_threshold(similarity_scores):
@@ -28,20 +28,20 @@ def auto_threshold(similarity_scores):
     """
     sim_array = np.array(similarity_scores)
     threshold = threshold_otsu(sim_array)
-    return threshold
+    return float(threshold)
 
 
 class AnalisadorRelevancia:
     def __init__(self):
-        # Carrega o modelo pré-treinado
+        # Carrega um modelo multilíngue pré-treinado.
         self.modelo = SentenceTransformer('sentence-transformers/distiluse-base-multilingual-cased-v2')
         self.model = RelevanciaModel()
         self.historico = []  # Armazena os resultados de cada avaliação.
-        self.limiar_padrao = 0.3  # Limiar padrão utilizado
+        self.limiar_padrao = 0.45  # Limiar padrão utilizado.
 
     def avaliar_relevancia(self, pergunta: str, resposta: str) -> dict:
         """
-        Recebe a pergunta e a resposta, realiza o pré-processamento, gera embeddings,
+        Recebe a pergunta e a resposta, realiza o pré-processamento, gera os embeddings,
         calcula a similaridade e armazena o resultado usando o limiar padrão.
         """
         pergunta_proc = self.model.preprocess_text(pergunta)
@@ -55,59 +55,77 @@ class AnalisadorRelevancia:
             'pergunta': pergunta,
             'resposta': resposta,
             'similaridade': similaridade,
-            'limiar': self.limiar_padrao,
-            'relevante': relevante
+            'limiar': float(self.limiar_padrao),
+            'relevante': bool(relevante)
         }
         self.historico.append(resultado)
         return resultado
 
-    def _interpretar_score(self, score: float) -> str:
+    def _interpretar_score(self, score: float) -> dict:
         """Retorna uma análise textual do nível de similaridade."""
-        analise = "ANÁLISE DE RELEVÂNCIA:\n"
         if score >= 0.7:
-            analise += "  Nível: Excelente correspondência\n"
-            analise += "  - Relação temática muito forte\n"
-            analise += "  - Contextos perfeitamente alinhados\n"
+            nivel = "Excelente correspondência"
+            observacoes = [
+                "Relação temática muito forte",
+                "Contextos perfeitamente alinhados"
+            ]
         elif score >= 0.5:
-            analise += "  Nível: Boa correspondência\n"
-            analise += "  - Tópico principal abordado\n"
-            analise += "  - Alguns pontos relevantes presentes\n"
+            nivel = "Boa correspondência"
+            observacoes = [
+                "Tópico principal abordado",
+                "Alguns pontos relevantes presentes"
+            ]
         elif score >= 0.3:
-            analise += "  Nível: Correspondência parcial\n"
-            analise += "  - Relação superficial com o tema\n"
-            analise += "  - Faltaram elementos essenciais\n"
+            nivel = "Correspondência parcial"
+            observacoes = [
+                "Relação superficial com o tema",
+                "Faltaram elementos essenciais"
+            ]
         else:
-            analise += "  Nível: Sem correspondência relevante\n"
-            analise += "  - Tópicos completamente divergentes\n"
-            analise += "  - Necessária revisão completa\n"
-        return analise
+            nivel = "Sem correspondência relevante"
+            observacoes = [
+                "Tópicos completamente divergentes",
+                "Necessária revisão completa"
+            ]
+        return {"nivel": nivel, "observacoes": observacoes}
 
     def gerar_relatorio(self, indice: int = -1) -> dict:
         """
-        Gera um relatório detalhado para o resultado especificado (última avaliação por padrão).
+        Gera um relatório detalhado para o resultado especificado (última avaliação por padrão),
+        retornando um JSON com a estrutura aprimorada.
         """
         dados = self.historico[indice]
-        relatorio = "\n" + "=" * 60 + "\n"
-        relatorio += " RELATÓRIO DE RELEVÂNCIA SEMÂNTICA ".center(60, '#') + "\n"
-        relatorio += "=" * 60 + "\n\n"
-        relatorio += f"Pergunta: {dados['pergunta']}\n"
-        relatorio += f"Resposta: {dados['resposta']}\n\n"
-        relatorio += f"Similaridade: {dados['similaridade']:.2f}\n"
-        relatorio += f"Limiar: {dados['limiar']:.2f}\n"
-        relatorio += f"Status: {'RELEVANTE ' if dados['relevante'] else 'NÃO RELEVANTE '}\n\n"
-        relatorio += "-" * 60 + "\n"
-        relatorio += self._interpretar_score(dados['similaridade']) + "\n"
-        relatorio += "-" * 60 + "\n"
-        relatorio += "RECOMENDAÇÕES:\n"
+        status_text = "Relevante" if dados['relevante'] else "Não relevante"
+
+        detalhes = {
+            "valorSimilaridade": dados['similaridade'],
+            "limiarUtilizado": dados['limiar'],
+            "status": status_text
+        }
+        analise = self._interpretar_score(dados['similaridade'])
+
         if dados['relevante']:
-            relatorio += "  - A resposta aborda adequadamente o tema da pergunta\n"
-            relatorio += "  - Conteúdo mantém coerência com o contexto solicitado\n"
+            recomendacoes = [
+                "A resposta aborda adequadamente o tema da pergunta",
+                "Conteúdo mantém coerência com o contexto solicitado"
+            ]
         else:
-            relatorio += "  - Resposta apresenta desvio temático significativo\n"
-            relatorio += "  - Recomenda-se revisão para melhor alinhamento com a pergunta\n"
-        relatorio += "=" * 60 + "\n"
-        dados['relatorio'] = relatorio
-        return dados
+            recomendacoes = [
+                "Revisar o alinhamento temático da resposta",
+                "Incluir elementos essenciais que abordem a pergunta de forma completa"
+            ]
+
+        relatorio = {
+            "pergunta": dados['pergunta'],
+            "resposta": dados['resposta'],
+            "similaridade": dados['similaridade'],
+            "limiar": dados['limiar'],
+            "relevante": dados['relevante'],
+            "detalhes": detalhes,
+            "analise": analise,
+            "recomendacoes": recomendacoes
+        }
+        return relatorio
 
     def ajustar_limiar_automaticamente(self) -> float:
         """
@@ -118,7 +136,7 @@ class AnalisadorRelevancia:
             novo_limiar = auto_threshold(scores)
             self.limiar_padrao = novo_limiar
             return novo_limiar
-        return self.limiar_padrao
+        return float(self.limiar_padrao)
 
 
 class RelevanciaController:
