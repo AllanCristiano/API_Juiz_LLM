@@ -110,9 +110,8 @@ class ComplianceResult:
             'conformidade_geral': bool(self.compliance_status),
             'violacoes': self.violations if self.violations else None,
             'detalhes_analise': self.categories,
-            'erro': self.error
+            'erro': self.error  # Pode ser None
         }
-
 
 class ComplianceAnalyzer:
     """Sistema de análise de conformidade regulatória."""
@@ -191,18 +190,14 @@ class ComplianceAnalyzer:
                 max_length=512,
                 padding='max_length'
             )
-
             with torch.no_grad():
                 outputs = self.model(**inputs)
-
             if self.embedding_method == "weighted":
                 mask = inputs['attention_mask'].unsqueeze(-1)
                 embedding = torch.sum(outputs.last_hidden_state * mask, dim=1) / torch.clamp(mask.sum(dim=1), min=1e-9)
             else:
                 embedding = outputs.last_hidden_state[:, 0, :]
-
             return embedding.numpy().flatten()
-
         except Exception as e:
             logger.error(f"Erro na geração de embedding: {e}")
             return np.zeros(self.model.config.hidden_size)
@@ -210,7 +205,6 @@ class ComplianceAnalyzer:
     def analisar(self, texto):
         """Executa a análise completa do texto e retorna um ComplianceResult."""
         resultado = ComplianceResult(texto, self.version)
-
         try:
             for categoria in self.config:
                 embedding_texto = self._gerar_embedding(texto)
@@ -219,19 +213,16 @@ class ComplianceAnalyzer:
                     embedding_norm = embedding_texto / norm
                 else:
                     embedding_norm = embedding_texto
-
                 similaridade = cosine_similarity(
                     [embedding_norm],
                     [self.embeddings_categorias[categoria]]
                 )[0][0]
-
                 termos_detectados = self._detectar_termos(texto, categoria)
                 violacao = self._verificar_violacao(
                     similaridade,
                     termos_detectados,
                     self.config[categoria]['threshold']
                 )
-
                 resultado.add_category_result(
                     category=categoria,
                     similarity=similaridade,
@@ -239,18 +230,15 @@ class ComplianceAnalyzer:
                     detected_terms=termos_detectados,
                     violation=violacao
                 )
-
         except Exception as e:
             logger.error(f"Erro na análise: {e}")
             resultado.set_error(str(e))
-
         return resultado
 
     def _detectar_termos(self, texto, categoria):
         """Detecta termos críticos e retorna metadados."""
         texto_normalizado = _normalize_text(texto)
         texto_stemmizado = self._aplicar_stemming(texto_normalizado)
-
         termos_exatos = []
         for original, stemmizado in zip(
                 self.config[categoria]['termos_criticos'],
@@ -261,7 +249,6 @@ class ComplianceAnalyzer:
                     'original_term': original,
                     'matched_variant': stemmizado
                 })
-
         termos_semanticos = []
         embedding_texto = self._gerar_embedding(texto)
         norm = np.linalg.norm(embedding_texto)
@@ -269,7 +256,6 @@ class ComplianceAnalyzer:
             embedding_norm = embedding_texto / norm
         else:
             embedding_norm = embedding_texto
-
         for termo in self.config[categoria]['termos_criticos']:
             embedding_termo = self._gerar_embedding(termo)
             norm_termo = np.linalg.norm(embedding_termo)
@@ -278,14 +264,12 @@ class ComplianceAnalyzer:
             else:
                 embedding_termo_norm = embedding_termo
             similaridade_termo = cosine_similarity([embedding_norm], [embedding_termo_norm])[0][0]
-
             if similaridade_termo > self.config[categoria]['threshold_semantico']:
                 termos_semanticos.append({
                     'term': termo,
                     'similarity': float(round(similaridade_termo, 2)),
                     'threshold': self.config[categoria]['threshold_semantico']
                 })
-
         return {
             'regex_terms': termos_exatos,
             'semantic_terms': termos_semanticos
