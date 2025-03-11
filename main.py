@@ -1,8 +1,10 @@
+from typing import List, Optional
+
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+
+from ia_constitucional import ComplianceAnalyzer
 from relevancia import RelevanciaController
-from ConstitucionalIA import ComplianceAnalyzer
 
 app = FastAPI()
 
