@@ -83,3 +83,21 @@ source venv/bin/activate
 # No Windows
 python -m venv venv
 venv\Scripts\activate
+
+
+```
+
+## 🚀 Execução
+
+Para executar a API, siga os passos abaixo:
+
+1. Certifique-se de estar na raiz do projeto (onde o arquivo `main.py` se encontra).
+2. Abra um terminal e, se necessário, ative seu ambiente virtual.
+3. Execute o comando abaixo para iniciar o servidor da API em modo de desenvolvimento (com recarga automática):
+
+   ```bash
+   uvicorn main:app --reload
+   
+    ```
+
+
