@@ -6,7 +6,11 @@ from pydantic import BaseModel, Field
 from ia_constitucional import ComplianceAnalyzer
 from relevancia import RelevanciaController
 
-app = FastAPI()
+app = FastAPI(
+    title="API JUIZ LLM",
+    description="Esta API avalia a relevância de respostas e verifica a conformidade de textos com regulamentos.",
+    version="1.0.0"
+)
 
 # Modelos para a funcionalidade de relevância
 class Consulta(BaseModel):

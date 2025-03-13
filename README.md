@@ -59,7 +59,27 @@ A validação ocorre em três etapas:
   - [SentenceTransformers](https://www.sbert.net/) para análise de relevância.
   - [Transformers](https://huggingface.co/transformers/) (BERT) para a análise de conformidade.
 - **Bibliotecas**:
-  - `torch`, `numpy`, `scikit-learn`, `scikit-image`, `nltk`
-  - `transformers`, `sentence-transformers`
+  - `torch`
+  - `numpy`
+  - `scikit-learn`
+  - `scikit-image`
+  - `nltk`
+  - `transformers`
+  - `sentence-transformers`
 - **Logging**: Configurado para registrar logs em `compliance_analysis.log`.
 
+## ⚙️ Instalação
+
+### Pré-requisitos
+
+- Certifique-se de ter o Python 3.10 ou superior instalado.
+- Recomenda-se criar um ambiente virtual para o projeto:
+
+```bash
+# Crie e ative o ambiente virtual (Linux/Mac)
+python3 -m venv venv
+source venv/bin/activate
+
+# No Windows
+python -m venv venv
+venv\Scripts\activate
